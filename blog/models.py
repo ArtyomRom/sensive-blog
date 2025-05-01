@@ -1,7 +1,7 @@
 from django.db import models
 from django.urls import reverse
 from django.contrib.auth.models import User
-from django.db.models import Count
+from django.db.models import Subquery, OuterRef, Count, IntegerField
 
 
 class PostQuerySet(models.QuerySet):
@@ -9,6 +9,26 @@ class PostQuerySet(models.QuerySet):
     def year(self, year):
         posts_at_year = self.filter(published_at__year=year).order_by('published_at')
         return posts_at_year
+
+    def popular(self):
+        # Подзапрос для лайков
+        likes_subquery = Post.objects.filter(pk=OuterRef('pk')) \
+                             .annotate(cnt=Count('likes')) \
+                             .values('cnt')[:1]
+
+        # Подзапрос для комментариев
+        comments_subquery = Post.objects.filter(pk=OuterRef('pk')) \
+                                .annotate(cnt=Count('comment')) \
+                                .values('cnt')[:1]
+
+        return Post.objects.select_related('author') \
+                   .prefetch_related('tags') \
+                   .annotate(
+            likes_count=Subquery(likes_subquery, output_field=IntegerField()),
+            comments_count=Subquery(comments_subquery, output_field=IntegerField())
+        ) \
+                   .order_by('-likes_count')
+
 
 class TagQuerySet(models.QuerySet):
     def popular(self):

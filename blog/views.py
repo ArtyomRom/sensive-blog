@@ -73,7 +73,7 @@ def serialize_post_optimized(post):
 
 def index(request):
 
-    most_popular_posts = get_most_popular_posts()
+    most_popular_posts = Post.objects.popular()[:5]
 
     fresh_posts = Post.objects \
                       .select_related('author') \
@@ -126,7 +126,7 @@ def post_detail(request, slug):
     }
 
     most_popular_tags = Tag.objects.popular()
-    most_popular_posts = get_most_popular_posts()
+    most_popular_posts = Post.objects.popular()[:5]
     context = {
         'post': serialized_post,
         'popular_tags': [serialize_tag(tag) for tag in most_popular_tags],
@@ -141,7 +141,7 @@ def tag_filter(request, tag_title):
     tag = Tag.objects.annotate(posts_count=Count('posts')).get(title=tag_title)
 
     most_popular_tags = Tag.objects.popular()
-    most_popular_posts = get_most_popular_posts()
+    most_popular_posts = Post.objects.popular()[:5]
 
     related_posts = tag.posts.all()[:20]
 
