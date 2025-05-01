@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from blog.models import Comment, Post, Tag
 from django.db.models import Subquery, OuterRef, Count, IntegerField
-
+from django.db.models import Prefetch
 
 def get_related_posts_count(tag):
     return tag.posts.count()
@@ -25,32 +25,31 @@ def serialize_post(post):
 def serialize_tag(tag):
     return {
         'title': tag.title,
-       # 'posts_with_tag': len(Post.objects.filter(tags=tag)),
-        'posts_with_tag': tag.posts_count
+        'posts_with_tag': getattr(tag, 'posts_count', 0)
     }
 
 def get_likes_count(post):
     return post.likes.count()
 
 
-def get_most_popular_posts(limit=5):
-    # Подзапрос для лайков
-    likes_subquery = Post.objects.filter(pk=OuterRef('pk')) \
-                         .annotate(cnt=Count('likes')) \
-                         .values('cnt')[:1]
-
-    # Подзапрос для комментариев
-    comments_subquery = Post.objects.filter(pk=OuterRef('pk')) \
-                            .annotate(cnt=Count('comment')) \
-                            .values('cnt')[:1]
-
-    return Post.objects.select_related('author') \
-               .prefetch_related('tags') \
-               .annotate(
-        likes_count=Subquery(likes_subquery, output_field=IntegerField()),
-        comments_count=Subquery(comments_subquery, output_field=IntegerField())
-    ) \
-               .order_by('-likes_count')[:limit]
+# def get_most_popular_posts(limit=5):
+#     # Подзапрос для лайков
+#     likes_subquery = Post.objects.filter(pk=OuterRef('pk')) \
+#                          .annotate(cnt=Count('likes')) \
+#                          .values('cnt')[:1]
+#
+#     # Подзапрос для комментариев
+#     comments_subquery = Post.objects.filter(pk=OuterRef('pk')) \
+#                             .annotate(cnt=Count('comment')) \
+#                             .values('cnt')[:1]
+#
+#     return Post.objects.select_related('author') \
+#                .prefetch_related('tags') \
+#                .annotate(
+#         likes_count=Subquery(likes_subquery, output_field=IntegerField()),
+#         comments_count=Subquery(comments_subquery, output_field=IntegerField())
+#     ) \
+#                .order_by('-likes_count')[:limit]
 
 # def get_most_popular_tags(limit=5):
 #     return Tag.objects.prefetch_related('posts') \
@@ -58,7 +57,7 @@ def get_most_popular_posts(limit=5):
 #         .order_by('-posts_count')[:limit]
 
 def serialize_post_optimized(post):
-    related_tags = list(post.tags.annotate(posts_count=Count('posts')))
+    related_tags = post.tags.all()
     return {
         'title': post.title,
         'teaser_text': post.text[:200],
@@ -75,12 +74,17 @@ def index(request):
 
     most_popular_posts = Post.objects.popular()[:5]
 
+    # fresh_posts = Post.objects \
+    #                   .select_related('author') \
+    #                   .prefetch_related('tags') \
+    #                   .annotate(comments_count=Count('comment', distinct=True)) \
+    #                   .order_by('-published_at')[:5]
+    tags_with_posts_count = Tag.objects.annotate(posts_count=Count('posts'))
     fresh_posts = Post.objects \
                       .select_related('author') \
-                      .prefetch_related('tags') \
+                      .prefetch_related(Prefetch('tags', queryset=tags_with_posts_count)) \
                       .annotate(comments_count=Count('comment', distinct=True)) \
                       .order_by('-published_at')[:5]
-
     most_fresh_posts = list(fresh_posts)[-5:]
 
     most_popular_tags = Tag.objects.popular()
