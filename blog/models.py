@@ -2,7 +2,7 @@ from django.db import models
 from django.urls import reverse
 from django.contrib.auth.models import User
 from django.db.models import Subquery, OuterRef, Count, IntegerField
-
+from django.db.models import Prefetch
 
 class PostQuerySet(models.QuerySet):
 
@@ -11,24 +11,29 @@ class PostQuerySet(models.QuerySet):
         return posts_at_year
 
     def popular(self):
-        # Подзапрос для лайков
-        likes_subquery = Post.objects.filter(pk=OuterRef('pk')) \
+        likes_subquery = self.model.objects.filter(pk=OuterRef('pk')) \
                              .annotate(cnt=Count('likes')) \
                              .values('cnt')[:1]
 
-        # Подзапрос для комментариев
-        comments_subquery = Post.objects.filter(pk=OuterRef('pk')) \
-                                .annotate(cnt=Count('comment')) \
+        comments_subquery = self.model.objects.filter(pk=OuterRef('pk')) \
+                                .annotate(cnt=Count('comments')) \
                                 .values('cnt')[:1]
 
-        return Post.objects.select_related('author') \
-                   .prefetch_related('tags') \
-                   .annotate(
+        return self.select_related('author') \
+            .prefetch_related('tags') \
+            .annotate(
             likes_count=Subquery(likes_subquery, output_field=IntegerField()),
             comments_count=Subquery(comments_subquery, output_field=IntegerField())
         ) \
-                   .order_by('-likes_count')
+            .order_by('-likes_count')
 
+    def fresh_posts(self):
+        tags_with_posts_count = Tag.objects.annotate(posts_count=Count('posts'))
+
+        return self.select_related('author') \
+                          .prefetch_related(Prefetch('tags', queryset=tags_with_posts_count)) \
+                          .annotate(comments_count=Count('comments', distinct=True)) \
+                          .order_by('-published_at')[:5]
 
 class TagQuerySet(models.QuerySet):
     def popular(self):
@@ -50,7 +55,6 @@ class Post(models.Model):
     slug = models.SlugField('Название в виде url', max_length=200)
     image = models.ImageField('Картинка')
     published_at = models.DateTimeField('Дата и время публикации')
-    objects = PostQuerySet.as_manager()
     author = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
@@ -66,16 +70,20 @@ class Post(models.Model):
         related_name='posts',
         verbose_name='Теги')
 
-    def __str__(self):
-        return self.title
 
-    def get_absolute_url(self):
-        return reverse('post_detail', args={'slug': self.slug})
+    objects = PostQuerySet.as_manager()
+
 
     class Meta:
         ordering = ['-published_at']
         verbose_name = 'пост'
         verbose_name_plural = 'посты'
+
+    def __str__(self):
+        return self.title
+
+    def get_absolute_url(self):
+        return reverse('post_detail', args={'slug': self.slug})
 
 
 class Tag(models.Model):
@@ -100,6 +108,7 @@ class Comment(models.Model):
     post = models.ForeignKey(
         'Post',
         on_delete=models.CASCADE,
+        related_name='comments',
         verbose_name='Пост, к которому написан')
     author = models.ForeignKey(
         User,
@@ -109,12 +118,12 @@ class Comment(models.Model):
     text = models.TextField('Текст комментария')
     published_at = models.DateTimeField('Дата и время публикации')
 
-    def __str__(self):
-        return f'{self.author.username} under {self.post.title}'
+
 
     class Meta:
         ordering = ['published_at']
         verbose_name = 'комментарий'
         verbose_name_plural = 'комментарии'
 
-
+    def __str__(self):
+        return f'{self.author.username} under {self.post.title}'
